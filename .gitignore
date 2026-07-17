@@ -1,0 +1,28 @@
+# 环境密钥文件（核心！禁止上传）
+.env
+
+# Python 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 虚拟环境文件夹
+venv/
+env/
+.venv/
+
+# Streamlit 缓存
+.streamlit/
+
+# 系统垃圾文件
+.DS_Store
+Thumbs.db
+
+# VSCode 配置文件夹
+.vscode/
+*.swp
+*.swo
+
+# 日志文件
+*.log
