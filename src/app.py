@@ -89,7 +89,7 @@ API_URL = "https://api.siliconflow.cn/v1/chat/completions"
 MODEL_NAME = "deepseek-ai/DeepSeek-V3.1-Terminus"
 MAX_RETRIES = 2
 RETRY_DELAY = 1.0
-REQUEST_TIMEOUT = (5, 30)  # 🔥 缩短超时时间
+REQUEST_TIMEOUT = (5, 30)
 
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
@@ -158,8 +158,6 @@ def init_session_state():
         "total_requests": 0,
         "error_count": 0,
         "pending_question": None,
-        "current_answer": None,
-        "current_role": None,
         "selected_role": "新生",
         "answer_length": 0,
         "api_elapsed": 0.0
@@ -172,12 +170,9 @@ def init_session_state():
 init_session_state()
 
 
-# ===================== 核心：流式问答处理（优化速度）=====================
+# ===================== 核心：流式问答处理 =====================
 def process_question_stream(question: str, role: str, placeholder) -> Optional[str]:
-    """
-    流式处理用户问题，实时显示回答
-    🔥 关键优化：max_tokens=600 + stream=True
-    """
+    """流式处理用户问题，实时显示回答"""
     if not question or not question.strip():
         return None
 
@@ -185,7 +180,6 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
         st.error("❌ API Key未配置，请联系管理员")
         return None
 
-    # 检查数据文件
     data_path = Path(__file__).parent.parent / "data"
     if not data_path.exists():
         st.error("📁 数据目录不存在，请检查data文件夹")
@@ -196,7 +190,6 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
         st.error("📄 数据文件缺失，请补齐data目录下的md文件")
         return None
 
-    # 加载数据和提示词（不计入API耗时）
     try:
         school_data = load_school_info()
         if not school_data:
@@ -211,7 +204,6 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
         st.error(f"❌ 加载学校信息失败: {str(e)}")
         return None
 
-    # 构建请求（🔥 max_tokens=600 大幅提速）
     payload = {
         "model": MODEL_NAME,
         "messages": [
@@ -219,20 +211,18 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
             {"role": "user", "content": question}
         ],
         "temperature": 0.7,
-        "max_tokens": 600,  # 🔥 降低token数，响应快3-4倍
-        "stream": True  # 🔥 开启流式输出
+        "max_tokens": 600,
+        "stream": True
     }
 
     last_error = None
 
     for attempt in range(MAX_RETRIES + 1):
         try:
-            # 限流控制
             current_time = time.time()
             if current_time - st.session_state.last_request_time < 1:
                 time.sleep(1)
 
-            # ===== 只计算纯API调用时间 =====
             api_start = time.time()
 
             resp = requests.post(
@@ -243,13 +233,11 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
                 stream=True
             )
 
-            # API耗时结束
             api_time = time.time() - api_start
 
             st.session_state.last_request_time = time.time()
             st.session_state.total_requests += 1
 
-            # HTTP状态码处理
             if resp.status_code == 200:
                 pass
             elif resp.status_code == 401:
@@ -274,7 +262,6 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
                 st.error(f"❌ API接口异常，状态码：{resp.status_code}")
                 return None
 
-            # ===== 流式读取回答 =====
             answer = ""
 
             for line in resp.iter_lines():
@@ -291,20 +278,16 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
                                 content = delta.get('content', '')
                                 if content:
                                     answer += content
-                                    # 实时更新显示（带光标动画）
                                     placeholder.markdown(answer + "▌")
                         except json.JSONDecodeError:
                             continue
 
-            # 最终显示（去掉光标）
             placeholder.markdown(answer)
 
-            # 验证答案
             if not answer or not answer.strip():
                 st.warning("⚠️ AI返回了空答案，请尝试重新提问")
                 return None
 
-            # 保存统计信息
             st.session_state["answer_length"] = len(answer)
             st.session_state["api_elapsed"] = api_time
 
@@ -345,60 +328,42 @@ def process_question_stream(question: str, role: str, placeholder) -> Optional[s
 
 # ===================== UI渲染 =====================
 def render_question_tabs():
-    """功能5：问题分类标签"""
+    """问题分类标签"""
     st.markdown("### 💡 试试这些问题（点击直接提问）")
 
     tab1, tab2, tab3 = st.tabs(["🎓 新生指南", "📋 办事流程", "🚨 应急防骗"])
 
-    # Tab1: 新生指南
     with tab1:
         st.caption("刚入学？看看这些常见问题")
         questions = TAB_QUESTIONS["新生指南"]
         cols = st.columns(2)
         for i, q in enumerate(questions):
             with cols[i % 2]:
-                if st.button(
-                        q,
-                        key=f"tab1_{i}",
-                        use_container_width=True,
-                        help=f"点击提问：{q}"
-                ):
-                    st.session_state["pending_question"] = q
+                if st.button(q, key=f"tab1_{i}", use_container_width=True):
                     st.session_state["question"] = q
+                    st.session_state["pending_question"] = q
                     st.rerun()
 
-    # Tab2: 办事流程
     with tab2:
         st.caption("办理各种事务？这里有流程指引")
         questions = TAB_QUESTIONS["办事流程"]
         cols = st.columns(2)
         for i, q in enumerate(questions):
             with cols[i % 2]:
-                if st.button(
-                        q,
-                        key=f"tab2_{i}",
-                        use_container_width=True,
-                        help=f"点击提问：{q}"
-                ):
-                    st.session_state["pending_question"] = q
+                if st.button(q, key=f"tab2_{i}", use_container_width=True):
                     st.session_state["question"] = q
+                    st.session_state["pending_question"] = q
                     st.rerun()
 
-    # Tab3: 应急防骗
     with tab3:
         st.caption("遇到紧急情况？快速查找帮助")
         questions = TAB_QUESTIONS["应急防骗"]
         cols = st.columns(2)
         for i, q in enumerate(questions):
             with cols[i % 2]:
-                if st.button(
-                        q,
-                        key=f"tab3_{i}",
-                        use_container_width=True,
-                        help=f"点击提问：{q}"
-                ):
-                    st.session_state["pending_question"] = q
+                if st.button(q, key=f"tab3_{i}", use_container_width=True):
                     st.session_state["question"] = q
+                    st.session_state["pending_question"] = q
                     st.rerun()
 
 
@@ -407,7 +372,6 @@ def render_ui():
     st.title("✈️ 小航 · 郑州航院校园信息助手")
     st.caption("你的郑航校园百事通，有事就问小航~")
 
-    # 身份选择
     role = st.selectbox(
         "请选择你的身份：",
         ROLES,
@@ -416,58 +380,32 @@ def render_ui():
     )
     st.session_state["selected_role"] = role
 
-    # 问题分类标签
     render_question_tabs()
 
-    # 问题输入区
     st.divider()
     st.markdown("### ✍️ 或直接输入你的问题")
+
     question = st.text_input(
         "🔍 有啥想问的？",
         value=st.session_state["question"],
         placeholder="例如：宿舍怎么申请？也可以点击上面的推荐问题",
-        key="question_input",
-        on_change=lambda: setattr(st.session_state, "pending_question", st.session_state.question_input)
+        key="question_input"
     )
 
     return role, question
 
 
-def render_answer(answer: str):
-    """渲染AI回答 + 功能6：元信息展示"""
-    # 回答已经在流式过程中显示了，这里只显示统计信息
-
-    # 功能6：显示字数和耗时
-    answer_length = st.session_state.get("answer_length", len(answer))
-    api_elapsed = st.session_state.get("api_elapsed", 0.0)
-    st.caption(f"📝 回答字数：{answer_length} 字 · ⚡ 耗时：{api_elapsed:.1f} 秒")
-
-    # 反馈按钮
-    st.divider()
-    col1, col2, col3 = st.columns([1, 1, 4])
-
-    with col1:
-        if st.button("👍 有帮助", key="helpful"):
-            st.success("感谢反馈！😊")
-
-    with col2:
-        if st.button("👎 需改进", key="improve"):
-            st.info("我们会持续优化！💪")
-
-
 def render_chat_history():
-    """渲染聊天历史（最新在最上面，顺序：时间→身份→问答）"""
+    """渲染聊天历史"""
     if st.session_state["chat_history"]:
         st.divider()
         with st.expander("📜 查看历史对话", expanded=False):
-            # 将聊天记录配对
             paired_history = []
             i = 0
             while i < len(st.session_state["chat_history"]):
                 if i + 1 < len(st.session_state["chat_history"]):
                     user_msg = st.session_state["chat_history"][i]
                     assistant_msg = st.session_state["chat_history"][i + 1]
-
                     paired_history.append({
                         "time": assistant_msg.get("timestamp", "未知时间"),
                         "role": assistant_msg.get("role_name", "未知身份"),
@@ -478,24 +416,18 @@ def render_chat_history():
                     })
                 i += 2
 
-            # 反转顺序，最新在最上面
             paired_history.reverse()
 
-            # 显示历史记录
             for idx, item in enumerate(paired_history):
                 st.caption(f"⏰ {item['time']}")
                 st.caption(f"👤 身份：{item['role']}")
                 st.markdown(f"**❓ 问题：** {item['question']}")
                 st.markdown(f"**💡 回答：** {item['answer']}")
-
-                # 历史统计信息
                 if item['length'] > 0:
                     st.caption(f"📝 {item['length']} 字 · ⚡ {item['elapsed']:.1f} 秒")
-
                 if idx < len(paired_history) - 1:
                     st.divider()
 
-            # 清除历史按钮
             if st.button("🗑️ 清除所有历史记录", key="clear_history"):
                 st.session_state["chat_history"] = []
                 st.rerun()
@@ -514,23 +446,24 @@ def main():
     """主程序入口"""
     role, question = render_ui()
 
-    # 检查是否有待处理的问题
+    # 获取输入框内容
+    input_value = st.session_state.get("question_input", "")
+
+    # 优先推荐按钮，其次输入框内容
     pending = st.session_state.get("pending_question")
+    if not pending and input_value and input_value.strip():
+        pending = input_value.strip()
 
     if pending and pending.strip():
         current_role = st.session_state.get("selected_role", "新生")
 
         st.markdown("### 📝 AI回答")
-
-        # 创建占位符用于流式显示
         answer_placeholder = st.empty()
 
         with st.spinner("🤔 小航正在思考中..."):
-            # 使用流式处理
             answer = process_question_stream(pending.strip(), current_role, answer_placeholder)
 
             if answer:
-                # 保存到聊天历史
                 current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 st.session_state["chat_history"].append({
@@ -548,12 +481,10 @@ def main():
                     "api_elapsed": st.session_state.get("api_elapsed", 0.0)
                 })
 
-                # 显示统计信息
                 length = st.session_state.get("answer_length", len(answer))
                 elapsed = st.session_state.get("api_elapsed", 0.0)
                 st.caption(f"📝 回答字数：{length} 字 · ⚡ 耗时：{elapsed:.1f} 秒")
 
-                # 反馈按钮
                 st.divider()
                 col1, col2, col3 = st.columns([1, 1, 4])
                 with col1:
@@ -563,25 +494,22 @@ def main():
                     if st.button("👎 需改进", key="improve_main"):
                         st.info("我们会持续优化！💪")
 
-                # 清空待处理标志和输入框
+                # 清空状态
                 st.session_state["pending_question"] = None
                 st.session_state["question"] = ""
-                st.session_state["current_answer"] = None
+                st.rerun()
             else:
                 st.session_state["pending_question"] = None
                 st.info("💡 提示：你可以查看下方的电话黄页获取直接联系方式")
 
-    elif not pending:
-        if question is not None and question.strip() == "":
-            st.info("💬 请点击上方推荐问题或直接输入你的问题")
+    else:
+        # 空输入友好提示
+        if not st.session_state.get("pending_question") and not input_value.strip():
+            st.info("💬 请输入你的问题，或点击上方推荐问题快速提问")
 
-    # 渲染聊天历史
     render_chat_history()
-
-    # 渲染电话黄页
     render_yellow_pages()
 
-    # 页脚
     st.divider()
     st.caption("© 2026 郑州航院 · 信息仅供参考，请以官方通知为准")
 
